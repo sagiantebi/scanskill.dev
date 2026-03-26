@@ -1,0 +1,37 @@
+{
+  "name": "skills-scanner",
+  "packageManager": "npm@10.8.2",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Skills Scanner - Cloudflare full-stack pipeline with worker cascade for skill analysis",
+  "type": "module",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "deploy": "turbo run deploy",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "turbo run db:generate",
+    "db:migrate": "turbo run db:migrate",
+    "wrangler:dev": "wrangler dev --local --port 8787 -c backend/wrangler.jsonc -c workers/worker1/wrangler.jsonc -c workers/worker2/wrangler.jsonc -c workers/worker3/wrangler.jsonc",
+    "dev:full": "turbo run dev --parallel"
+  },
+  "workspaces": [
+    "backend",
+    "workers/*",
+    "frontend"
+  ],
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "turbo": "^2.4.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  }
+}

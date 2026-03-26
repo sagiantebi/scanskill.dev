@@ -1,0 +1,65 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skills-scanner-worker3",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "skills-scanner-db",
+      "database_id": "skills-scanner-db"
+    }
+  ],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "skills-queue-3",
+        "max_batch_size": 5,
+        "max_batch_timeout": 30
+      }
+    ]
+  },
+  "env": {
+    "staging": {
+      "name": "skills-scanner-worker3-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "skills-scanner-db-staging",
+          "database_id": "d6435595-1d8e-43cc-8667-9acf8ea788cf"
+        }
+      ],
+      "queues": {
+        "consumers": [
+          {
+            "queue": "skills-queue-3-staging",
+            "max_batch_size": 5,
+            "max_batch_timeout": 30
+          }
+        ]
+      }
+    },
+    "production": {
+      "name": "skills-scanner-worker3",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "skills-scanner-db",
+          "database_id": "dc895145-b3dc-401e-924e-cafb39ef91be"
+        }
+      ],
+      "queues": {
+        "consumers": [
+          {
+            "queue": "skills-queue-3",
+            "max_batch_size": 5,
+            "max_batch_timeout": 30
+          }
+        ]
+      }
+    }
+  }
+}

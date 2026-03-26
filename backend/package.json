@@ -1,0 +1,36 @@
+{
+  "name": "skills-scanner-backend",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787 -c wrangler.jsonc -c ../workers/worker1/wrangler.jsonc -c ../workers/worker2/wrangler.jsonc -c ../workers/worker3/wrangler.jsonc",
+    "deploy": "npm run build --prefix ../frontend && wrangler deploy",
+    "deploy:staging": "npm run build --prefix ../frontend && wrangler deploy --env staging",
+    "deploy:production": "npm run build --prefix ../frontend && wrangler deploy --env production",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:pure": "vitest run --config vitest.pure.config.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply DB --config wrangler.jsonc --local",
+    "db:migrate:staging": "wrangler d1 migrations apply DB --config wrangler.jsonc --env staging --remote",
+    "db:migrate:production": "wrangler d1 migrations apply DB --config wrangler.jsonc --env production --remote",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.0",
+    "@hono/zod-validator": "^0.5.0",
+    "drizzle-orm": "^0.41.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/workers-types": "^4.20250320.0",
+    "drizzle-kit": "^0.30.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

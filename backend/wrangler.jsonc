@@ -1,0 +1,84 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skills-scanner-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "../frontend/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "skills-scanner-db",
+      "database_id": "skills-scanner-db",
+      "migrations_dir": "drizzle/migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "SKILLS_QUEUE_1",
+        "queue": "skills-queue-1"
+      }
+    ]
+  },
+  "env": {
+    "staging": {
+      "name": "skills-scanner-backend-staging",
+      "routes": [
+        {
+          "pattern": "staging.scanskill.dev",
+          "custom_domain": true
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "skills-scanner-db-staging",
+          "database_id": "d6435595-1d8e-43cc-8667-9acf8ea788cf",
+          "migrations_dir": "drizzle/migrations"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "SKILLS_QUEUE_1",
+            "queue": "skills-queue-1-staging"
+          }
+        ]
+      }
+    },
+    "production": {
+      "name": "skills-scanner-backend",
+      "routes": [
+        {
+          "pattern": "scanskill.dev",
+          "custom_domain": true
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "skills-scanner-db",
+          "database_id": "dc895145-b3dc-401e-924e-cafb39ef91be",
+          "migrations_dir": "drizzle/migrations"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "SKILLS_QUEUE_1",
+            "queue": "skills-queue-1"
+          }
+        ]
+      }
+    }
+  }
+}

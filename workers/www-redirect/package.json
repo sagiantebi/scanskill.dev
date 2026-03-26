@@ -1,0 +1,16 @@
+{
+  "name": "skills-scanner-www-redirect",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250320.0",
+    "typescript": "^5.8.0",
+    "wrangler": "^4.0.0"
+  }
+}

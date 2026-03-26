@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  --color-accent: oklch(0.55 0.09 180);
+  --color-accent-muted: oklch(0.93 0.02 180);
+}
+
+/* Dark palette: use :root overrides — nested `@theme` inside `@media` is merged into default :root by Tailwind v4. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-accent: oklch(0.72 0.09 180);
+    --color-accent-muted: oklch(0.28 0.04 180);
+  }
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+}

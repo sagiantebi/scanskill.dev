@@ -1,0 +1,49 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skills-scanner",
+  "compatibility_date": "2025-03-01",
+  "main": "backend/src/index.ts",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "assets": {
+    "directory": "frontend/dist",
+    "not_found_handling": "single-page-application"
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "SKILLS_QUEUE_1",
+        "queue": "skills-queue-1"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "skills-queue-1",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30
+      },
+      {
+        "queue": "skills-queue-2",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30
+      },
+      {
+        "queue": "skills-queue-3",
+        "max_batch_size": 5,
+        "max_batch_timeout": 30
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "skills-scanner-db",
+      "database_id": "skills-scanner-db",
+      "migrations_dir": "backend/drizzle/migrations"
+    }
+  ]
+}

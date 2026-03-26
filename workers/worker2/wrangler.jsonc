@@ -1,0 +1,65 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skills-scanner-worker2",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "queues": {
+    "consumers": [
+      {
+        "queue": "skills-queue-2",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30
+      }
+    ],
+    "producers": [
+      {
+        "binding": "SKILLS_QUEUE_3",
+        "queue": "skills-queue-3"
+      }
+    ]
+  },
+  "env": {
+    "staging": {
+      "name": "skills-scanner-worker2-staging",
+      "queues": {
+        "consumers": [
+          {
+            "queue": "skills-queue-2-staging",
+            "max_batch_size": 10,
+            "max_batch_timeout": 30
+          }
+        ],
+        "producers": [
+          {
+            "binding": "SKILLS_QUEUE_3",
+            "queue": "skills-queue-3-staging"
+          }
+        ]
+      }
+    },
+    "production": {
+      "name": "skills-scanner-worker2",
+      "queues": {
+        "consumers": [
+          {
+            "queue": "skills-queue-2",
+            "max_batch_size": 10,
+            "max_batch_timeout": 30
+          }
+        ],
+        "producers": [
+          {
+            "binding": "SKILLS_QUEUE_3",
+            "queue": "skills-queue-3"
+          }
+        ]
+      }
+    }
+  }
+}

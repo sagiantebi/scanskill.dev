@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+**/dist/
+.next/
+out/
+
+# Turbo / caches
+.turbo/
+
+# Cloudflare Wrangler local state (may include account-linked metadata)
+.wrangler/
+**/.wrangler/
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Testing
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+
+# Cursor / local AI editor config (optional; keep local only)
+.cursor/
+
+# TypeScript
+*.tsbuildinfo

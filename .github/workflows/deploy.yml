@@ -1,0 +1,121 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Cloudflare environment to deploy
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_env: ${{ steps.resolve.outputs.deploy_env }}
+
+    steps:
+      - name: Resolve deploy environment
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "deploy_env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          case "${{ github.ref_name }}" in
+            main)
+              echo "deploy_env=production" >> "$GITHUB_OUTPUT"
+              ;;
+            staging)
+              echo "deploy_env=staging" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported branch: ${{ github.ref_name }}" >&2
+              exit 1
+              ;;
+          esac
+
+  verify:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    needs: [resolve, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ needs.resolve.outputs.deploy_env }}
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build --prefix frontend
+
+      - name: Apply remote D1 migrations
+        working-directory: backend
+        run: npm run db:migrate:${{ needs.resolve.outputs.deploy_env }}
+
+      - name: Deploy queue worker 1
+        run: npx wrangler deploy --config workers/worker1/wrangler.jsonc --env ${{ needs.resolve.outputs.deploy_env }}
+
+      - name: Deploy queue worker 2
+        run: npx wrangler deploy --config workers/worker2/wrangler.jsonc --env ${{ needs.resolve.outputs.deploy_env }}
+
+      - name: Deploy queue worker 3
+        run: npx wrangler deploy --config workers/worker3/wrangler.jsonc --env ${{ needs.resolve.outputs.deploy_env }}
+
+      - name: Deploy backend Worker and static assets
+        run: npx wrangler deploy --config backend/wrangler.jsonc --env ${{ needs.resolve.outputs.deploy_env }}
+
+      - name: Deploy www redirect Worker
+        if: needs.resolve.outputs.deploy_env == 'production'
+        run: npx wrangler deploy --config workers/www-redirect/wrangler.jsonc --env production
