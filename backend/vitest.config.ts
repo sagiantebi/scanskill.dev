@@ -5,7 +5,8 @@ export default defineWorkersConfig({
     poolOptions: {
       workers: {
         main: './src/index.ts',
-        wrangler: { configPath: './wrangler.jsonc' },
+        // Worker-only config: main wrangler.jsonc points at ../frontend/dist (missing before frontend build).
+        wrangler: { configPath: './wrangler.vitest.jsonc' },
         miniflare: {
           compatibilityDate: '2025-03-01',
         },

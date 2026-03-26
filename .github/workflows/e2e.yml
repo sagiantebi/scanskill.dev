@@ -26,10 +26,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Install browsers from frontend so the CLI matches @playwright/test in that workspace.
       - name: Install Playwright Chromium
+        working-directory: frontend
         run: npx playwright install chromium --with-deps
 
       - name: Frontend E2E
-        run: npm run test:e2e --prefix frontend
+        working-directory: frontend
+        run: npm run test:e2e
         env:
           CI: true

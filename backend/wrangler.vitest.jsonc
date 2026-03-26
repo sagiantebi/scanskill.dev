@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skills-scanner-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "skills-scanner-db",
+      "database_id": "skills-scanner-db",
+      "migrations_dir": "drizzle/migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "SKILLS_QUEUE_1",
+        "queue": "skills-queue-1"
+      }
+    ]
+  }
+}

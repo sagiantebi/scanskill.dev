@@ -391,8 +391,12 @@ test.describe('ScanPage — edge cases', () => {
 
     await page.goto(`/scan/${jobId}`)
     await page.evaluate((id) => {
+      // React Router v7 stores navigate() state in history.state.usr (see createBrowserLocation).
       window.history.replaceState(
-        { notice: 'URL used as source; text field was ignored.' },
+        {
+          usr: { notice: 'URL used as source; text field was ignored.' },
+          key: 'e2e-route-notice',
+        },
         '',
         `/scan/${id}`,
       )
