@@ -13,6 +13,7 @@ export type ScanResponse = {
   id: string
   status: string
   progress: number
+  progressPhase?: string
   stage?: number
   sourceUrl?: string
   originalSkillMarkdown?: string

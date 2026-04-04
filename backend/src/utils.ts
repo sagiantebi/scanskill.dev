@@ -32,6 +32,19 @@ export function computePendingUrlJobInputHash(jobId: string): string {
 }
 
 /**
+ * Placeholder hash for a text job when API deduplication is off.
+ * Must be unique per job row (D1 unique index on input_hash); worker1 resolves the real content hash.
+ */
+export function computePendingTextJobInputHash(jobId: string): string {
+  return `pending-text:${jobId}`
+}
+
+/** When unset or any value other than the string "false", deduplication is enabled. */
+export function isSkillScanDedupEnabled(raw: string | undefined): boolean {
+  return raw !== 'false'
+}
+
+/**
  * Find a completed scan for the same source URL (early dedupe before fetch).
  */
 export async function findCompletedJobBySourceUrl(db: D1Database, url: string) {

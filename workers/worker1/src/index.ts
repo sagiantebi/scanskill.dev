@@ -3,6 +3,15 @@ import type { QueueMessage } from './types'
 import { extractUrls } from './types'
 import type { QueueMessageMetadata } from '../../../backend/src/types'
 import { computeInputHash } from '../../../backend/src/utils'
+import {
+  markJobProcessing,
+  PROGRESS_STAGE1_DONE,
+  PROGRESS_URL_CLAIMED,
+  PROGRESS_URL_FETCHED,
+  PROGRESS_PROCESSING,
+  raiseJobProgress,
+  PROGRESS_COMPLETE,
+} from '../../../backend/src/job-progress'
 
 export interface Env {
   SKILLS_QUEUE_1: Queue
@@ -196,15 +205,17 @@ async function copyScanResultsFromCanonical(
 
   await db
     .prepare(
-      `UPDATE jobs SET original_text = ?, status = 'completed', stage = 3, updated_at = unixepoch() WHERE id = ?`,
+      `UPDATE jobs SET original_text = ?, status = 'completed', stage = 3, progress = ?, updated_at = unixepoch() WHERE id = ?`,
     )
-    .bind(originalMarkdown, targetJobId)
+    .bind(originalMarkdown, PROGRESS_COMPLETE, targetJobId)
     .run()
 }
 
 async function markJobFailed(db: D1Database, jobId: string): Promise<void> {
   await db
-    .prepare(`UPDATE jobs SET status = 'failed', updated_at = unixepoch() WHERE id = ?`)
+    .prepare(
+      `UPDATE jobs SET status = 'failed', progress = 0, updated_at = unixepoch() WHERE id = ?`,
+    )
     .bind(jobId)
     .run()
 }
@@ -217,9 +228,11 @@ async function claimContentHashAndOriginalText(
 ): Promise<'ok' | 'conflict'> {
   await db
     .prepare(
-      `UPDATE jobs SET input_hash = ?, original_text = ?, status = 'processing', updated_at = unixepoch() WHERE id = ?`,
+      `UPDATE jobs SET input_hash = ?, original_text = ?, status = 'processing',
+        progress = CASE WHEN COALESCE(progress, 0) < ? THEN ? ELSE progress END,
+        updated_at = unixepoch() WHERE id = ?`,
     )
-    .bind(contentHash, markdown, jobId)
+    .bind(contentHash, markdown, PROGRESS_URL_CLAIMED, PROGRESS_URL_CLAIMED, jobId)
     .run()
 
   const row = await db
@@ -253,6 +266,61 @@ async function resolveUrlJob(
     await markJobFailed(env.DB, job.id)
     return { kind: 'failed' }
   }
+
+  await markJobProcessing(env.DB, job.id, PROGRESS_URL_FETCHED)
+
+  const contentHash = await computeInputHash(markdown)
+
+  const canonicalId = await findCanonicalCompletedJobId(env.DB, contentHash, job.id)
+  if (canonicalId) {
+    await copyScanResultsFromCanonical(env.DB, canonicalId, job.id, markdown)
+    return { kind: 'deduped', markdown, contentHash }
+  }
+
+  const claimed = await claimContentHashAndOriginalText(env.DB, job.id, contentHash, markdown)
+  if (claimed === 'ok') {
+    return { kind: 'proceed', markdown, contentHash }
+  }
+
+  const other = await env.DB
+    .prepare(`SELECT id FROM jobs WHERE input_hash = ? AND id != ? LIMIT 1`)
+    .bind(contentHash, job.id)
+    .first<{ id: string }>()
+
+  if (!other?.id) {
+    await markJobFailed(env.DB, job.id)
+    return { kind: 'failed' }
+  }
+
+  const hasResults = await env.DB
+    .prepare(`SELECT 1 AS n FROM scan_results WHERE id = ? LIMIT 1`)
+    .bind(other.id)
+    .first<{ n: number }>()
+
+  if (!hasResults) {
+    throw new Error(`Content hash claimed but scan not ready yet for winner ${other.id}; retry`)
+  }
+
+  await copyScanResultsFromCanonical(env.DB, other.id, job.id, markdown)
+  return { kind: 'deduped', markdown, contentHash }
+}
+
+/** Resolves real content hash for text jobs enqueued with `pending-text:${jobId}` (API dedup off). */
+async function resolvePendingTextJob(
+  env: Env,
+  job: QueueMessage,
+): Promise<
+  | { kind: 'deduped'; markdown: string; contentHash: string }
+  | { kind: 'proceed'; markdown: string; contentHash: string }
+  | { kind: 'failed' }
+> {
+  const markdown = job.originalText?.trim() ?? ''
+  if (!markdown) {
+    await markJobFailed(env.DB, job.id)
+    return { kind: 'failed' }
+  }
+
+  await markJobProcessing(env.DB, job.id, PROGRESS_PROCESSING)
 
   const contentHash = await computeInputHash(markdown)
 
@@ -307,11 +375,22 @@ const handler: ExportedHandler<Env> = {
           }
           sourceText = urlResult.markdown
           contentHashForMessage = urlResult.contentHash
+        } else if (job.inputHash?.startsWith('pending-text:')) {
+          const textResult = await resolvePendingTextJob(env, job)
+          if (textResult.kind === 'failed' || textResult.kind === 'deduped') {
+            message.ack()
+            continue
+          }
+          sourceText = textResult.markdown
+          contentHashForMessage = textResult.contentHash
+        } else {
+          await markJobProcessing(env.DB, job.id, PROGRESS_PROCESSING)
         }
 
         const stage1 = processStage1(sourceText)
         const processed = buildStage2Message(job, sourceText, contentHashForMessage, stage1)
 
+        await raiseJobProgress(env.DB, job.id, PROGRESS_STAGE1_DONE)
         await env.SKILLS_QUEUE_2.send(processed)
         message.ack()
       } catch (error) {

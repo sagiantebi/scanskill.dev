@@ -9,7 +9,7 @@
     "deploy": "npm run build --prefix ../frontend && wrangler deploy",
     "deploy:staging": "npm run build --prefix ../frontend && wrangler deploy --env staging",
     "deploy:production": "npm run build --prefix ../frontend && wrangler deploy --env production",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.dedup-off.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "test:pure": "vitest run --config vitest.pure.config.ts",
     "db:generate": "drizzle-kit generate",

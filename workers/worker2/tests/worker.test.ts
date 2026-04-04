@@ -3,6 +3,12 @@ import {
   dedupeTags,
   trimToWordLimit,
   fallbackSummary,
+  stripYamlFrontmatter,
+  firstMarkdownParagraph,
+  extractBalancedJsonObject,
+  stripMarkdownJsonFence,
+  parseLlmTaggingJson,
+  normalizeLlmTaggingResponse,
   detectObfuscationSignals,
   computeRiskLevel,
   runDeterministicDetection,
@@ -10,7 +16,7 @@ import {
   buildStage3Message,
 } from '../src/index'
 import type { Stage2DetectionResult } from '../src/index'
-import { extractShellCommands, detectInjections, getTagsFromText } from '../src/types'
+import { extractShellCommands, trimProseAfterUrl, detectInjections, getTagsFromText } from '../src/types'
 import type { QueueMessage } from '../src/types'
 
 /* ── dedupeTags ───────────────────────────────────────────────── */
@@ -59,17 +65,98 @@ describe('trimToWordLimit', () => {
   })
 })
 
+/* ── stripYamlFrontmatter / firstMarkdownParagraph ───────────── */
+
+describe('stripYamlFrontmatter', () => {
+  it('removes leading YAML fence and keeps body', () => {
+    const md = '---\ntitle: x\n---\n\n# Hello\n\nMore.'
+    expect(stripYamlFrontmatter(md).startsWith('# Hello')).toBe(true)
+  })
+
+  it('returns original text when no frontmatter', () => {
+    expect(stripYamlFrontmatter('plain body')).toBe('plain body')
+  })
+})
+
+describe('firstMarkdownParagraph', () => {
+  it('uses first block after frontmatter', () => {
+    const md = '---\na: 1\n---\n\nFirst para line.\n\nSecond block.'
+    expect(firstMarkdownParagraph(md)).toBe('First para line.')
+  })
+})
+
+/* ── JSON parsing helpers ─────────────────────────────────────── */
+
+describe('extractBalancedJsonObject', () => {
+  it('extracts object when summary string contains a brace character', () => {
+    const raw = 'prefix {"tags":[],"summary":"literal } in summary"} suffix'
+    const json = extractBalancedJsonObject(raw)
+    expect(json).toBe('{"tags":[],"summary":"literal } in summary"}')
+    expect(JSON.parse(json!).summary).toBe('literal } in summary')
+  })
+})
+
+describe('stripMarkdownJsonFence', () => {
+  it('strips json code fence', () => {
+    const s = '```json\n{"tags":[],"summary":"ok"}\n```'
+    expect(stripMarkdownJsonFence(s)).toBe('{"tags":[],"summary":"ok"}')
+  })
+})
+
+describe('parseLlmTaggingJson', () => {
+  it('parses fenced JSON', () => {
+    const r = parseLlmTaggingJson('```\n{"tags":["a"],"summary":"s"}\n```')
+    expect(r).toEqual({ tags: ['a'], summary: 's' })
+  })
+
+  it('parses JSON with trailing prose via balanced extract', () => {
+    const r = parseLlmTaggingJson('Here: {"tags":[],"summary":"hi"} thanks')
+    expect(r).toEqual({ tags: [], summary: 'hi' })
+  })
+
+  it('returns null for invalid input', () => {
+    expect(parseLlmTaggingJson('no json')).toBeNull()
+  })
+})
+
+describe('normalizeLlmTaggingResponse', () => {
+  it('returns null for empty summary', () => {
+    expect(normalizeLlmTaggingResponse({ tags: [], summary: '  ' }, 'body')).toBeNull()
+  })
+
+  it('returns null when summary equals full source', () => {
+    const t = 'exact echo'
+    expect(normalizeLlmTaggingResponse({ summary: 'exact echo' }, t)).toBeNull()
+  })
+
+  it('returns null when summary is too long vs source', () => {
+    const src = 'x'.repeat(250)
+    const sum = 'y'.repeat(220)
+    expect(normalizeLlmTaggingResponse({ summary: sum }, src)).toBeNull()
+  })
+
+  it('accepts normal short summary', () => {
+    const long = 'word '.repeat(80).trim()
+    expect(normalizeLlmTaggingResponse({ tags: ['t'], summary: 'Short.' }, long)).toEqual({
+      tags: ['t'],
+      summary: 'Short.',
+    })
+  })
+})
+
 /* ── fallbackSummary ──────────────────────────────────────────── */
 
 describe('fallbackSummary', () => {
-  it('truncates long text to 128 words', () => {
+  it('truncates long text to 40 words plus suffix', () => {
     const long = Array.from({ length: 200 }, (_, i) => `word${i}`).join(' ')
     const result = fallbackSummary(long)
-    expect(result.split(/\s+/).length).toBe(128)
+    expect(result).toContain('(AI summary unavailable.)')
+    const without = result.replace(/\s*\(AI summary unavailable\.\)\s*$/, '')
+    expect(without.split(/\s+/).length).toBeLessThanOrEqual(40)
   })
 
-  it('returns short text as-is', () => {
-    expect(fallbackSummary('short text here')).toBe('short text here')
+  it('uses short first paragraph plus suffix', () => {
+    expect(fallbackSummary('short text here')).toBe('short text here (AI summary unavailable.)')
   })
 })
 
@@ -130,12 +217,26 @@ describe('computeRiskLevel', () => {
   })
 })
 
+/* ── trimProseAfterUrl ───────────────────────────────────────── */
+
+describe('trimProseAfterUrl', () => {
+  it('removes natural language after a URL', () => {
+    expect(trimProseAfterUrl('curl https://x.com for more details')).toBe('curl https://x.com')
+  })
+})
+
 /* ── extractShellCommands ─────────────────────────────────────── */
 
 describe('extractShellCommands', () => {
   it('extracts a single command', () => {
     const result = extractShellCommands('run curl https://example.com')
     expect(result).toEqual(['curl https://example.com'])
+  })
+
+  it('strips prose after URL on the same line', () => {
+    expect(extractShellCommands('run curl https://example.com for installation steps')).toEqual([
+      'curl https://example.com',
+    ])
   })
 
   it('splits chained commands correctly', () => {
@@ -155,6 +256,21 @@ describe('extractShellCommands', () => {
   it('strips trailing punctuation', () => {
     const result = extractShellCommands('Execute npm install.')
     expect(result.every((cmd) => !cmd.endsWith('.'))).toBe(true)
+  })
+
+  it('caps very long command lines', () => {
+    const filler = 'x'.repeat(500)
+    const result = extractShellCommands(`npm install ${filler}`)
+    expect(result[0].length).toBeLessThanOrEqual(400)
+    expect(result[0].endsWith('…')).toBe(true)
+  })
+
+  it('merges shellCommandCandidates with full-text scan', () => {
+    const candidates = ['curl https://only-in-fence.com/path']
+    const body = 'eval("x")'
+    const result = extractShellCommands(body, candidates)
+    expect(result).toContain('curl https://only-in-fence.com/path')
+    expect(result.some((c) => c.startsWith('eval'))).toBe(true)
   })
 })
 
@@ -268,7 +384,7 @@ describe('assembleStage2Result', () => {
   it('falls back to deterministic tags and summary when AI returns null', () => {
     const result = assembleStage2Result('some skill text here', baseDetection, null)
     expect(result.tags).toEqual(['programming'])
-    expect(result.summary).toBe('some skill text here')
+    expect(result.summary).toBe('some skill text here (AI summary unavailable.)')
   })
 
   it('computes risk level from detection result', () => {

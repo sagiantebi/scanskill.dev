@@ -1,5 +1,10 @@
 /// <reference types="@cloudflare/workers-types" />
 import type { QueueMessage, QueueMessageMetadata, SanitizedSkill } from './types'
+import {
+  PROGRESS_COMPLETE,
+  PROGRESS_FINALIZING,
+  raiseJobProgress,
+} from '../../../backend/src/job-progress'
 
 export interface Env {
   DB: D1Database
@@ -69,6 +74,8 @@ const handler: ExportedHandler<Env> = {
         const sanitizedSkill = assembleSanitizedSkill(job, metadata)
         const bindings = serializeScanResultBindings(job.id, sanitizedSkill)
 
+        await raiseJobProgress(env.DB, job.id, PROGRESS_FINALIZING)
+
         await env.DB.prepare(
           `INSERT INTO scan_results (id, job_id, sanitized_text, urls, shell_commands, injections, tags, risk_level, tldr, metadata)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -77,9 +84,9 @@ const handler: ExportedHandler<Env> = {
           .run()
 
         await env.DB.prepare(
-          `UPDATE jobs SET status = 'completed', stage = 3, updated_at = unixepoch() WHERE id = ?`,
+          `UPDATE jobs SET status = 'completed', stage = 3, progress = ?, updated_at = unixepoch() WHERE id = ?`,
         )
-          .bind(job.id)
+          .bind(PROGRESS_COMPLETE, job.id)
           .run()
 
         console.log(`Skill scan completed for job ${job.id}. Risk: ${sanitizedSkill.riskLevel}`)

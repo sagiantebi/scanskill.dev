@@ -6,13 +6,22 @@ import {
   computeInputHash,
   findJobByHash,
   computePendingUrlJobInputHash,
+  computePendingTextJobInputHash,
   findCompletedJobBySourceUrl,
+  isSkillScanDedupEnabled,
 } from './utils'
 import { AppError } from './app-error'
+import {
+  PROGRESS_QUEUED,
+  progressPhaseFromValue,
+  resolveJobProgressPercent,
+} from './job-progress'
 
 export type SkillsScannerBindings = {
   DB: D1Database
   SKILLS_QUEUE_1: Queue
+  /** Set to the string "false" to disable API-level deduplication (new job per submit). */
+  SKILL_SCAN_DEDUP_ENABLED?: string
 }
 
 const app = new Hono<{ Bindings: SkillsScannerBindings }>()
@@ -81,8 +90,8 @@ export function buildJobInsertBindings(
   sourceType: 'text' | 'url',
   url: string | null,
   userId: string | null,
-): [string, string, string, string, string | null, string | null, string, number] {
-  return [jobId, inputHash, content, sourceType, url, userId, 'queued', 1]
+): [string, string, string, string, string | null, string | null, string, number, number] {
+  return [jobId, inputHash, content, sourceType, url, userId, 'queued', 1, PROGRESS_QUEUED]
 }
 
 export function formatScanResultResponse(
@@ -102,6 +111,7 @@ export function formatScanResultResponse(
     id,
     status: job.status,
     progress: 100,
+    progressPhase: 'Complete',
     sourceUrl,
     originalSkillMarkdown,
     result: {
@@ -128,15 +138,21 @@ export function formatJobProgressResponse(
       ? job.original_text
       : undefined
 
-  const stageNum =
-    typeof job.stage === 'number'
-      ? job.stage
-      : Number(job.stage ?? 0) || 0
+  const statusStr =
+    typeof job.status === 'string' && job.status.length > 0
+      ? job.status
+      : 'processing'
+  const progress = resolveJobProgressPercent(job)
+  const progressPhase =
+    statusStr === 'failed'
+      ? 'Scan failed'
+      : progressPhaseFromValue(progress)
 
   return {
     id,
-    status: job.status || 'processing',
-    progress: stageNum ? stageNum * 33 : 33,
+    status: statusStr,
+    progress,
+    progressPhase,
     stage: job.stage,
     sourceUrl,
     originalSkillMarkdown,
@@ -179,19 +195,22 @@ type SkillInput = z.infer<typeof SkillInputSchema>
 // Performs early deduplication using SHA-256 hash of normalized input
 app.post('/api/skills', zValidator('json', SkillInputSchema), async (c) => {
   const input = c.req.valid('json')
-  
+  const dedupEnabled = isSkillScanDedupEnabled(c.env.SKILL_SCAN_DEDUP_ENABLED)
+
   try {
     if (input.sourceType === 'url') {
       const sourceUrl = input.url!.trim()
-      const cachedByUrl = await findCompletedJobBySourceUrl(c.env.DB, sourceUrl)
-      if (cachedByUrl) {
-        return c.json({
-          success: true,
-          message: 'Skill already scanned for this URL - returning cached result',
-          jobId: cachedByUrl.id,
-          status: cachedByUrl.status,
-          cached: true,
-        })
+      if (dedupEnabled) {
+        const cachedByUrl = await findCompletedJobBySourceUrl(c.env.DB, sourceUrl)
+        if (cachedByUrl) {
+          return c.json({
+            success: true,
+            message: 'Skill already scanned for this URL - returning cached result',
+            jobId: cachedByUrl.id,
+            status: cachedByUrl.status,
+            cached: true,
+          })
+        }
       }
 
       const jobId = crypto.randomUUID()
@@ -199,8 +218,8 @@ app.post('/api/skills', zValidator('json', SkillInputSchema), async (c) => {
       const bindings = buildJobInsertBindings(jobId, pendingHash, '', 'url', sourceUrl, input.userId || null)
 
       await c.env.DB.prepare(
-        `INSERT INTO jobs (id, input_hash, original_text, source_type, url, user_id, status, stage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO jobs (id, input_hash, original_text, source_type, url, user_id, status, stage, progress)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(...bindings).run()
 
       await c.env.SKILLS_QUEUE_1.send(buildUrlQueueMessage(jobId, pendingHash, sourceUrl, input.userId))
@@ -214,29 +233,31 @@ app.post('/api/skills', zValidator('json', SkillInputSchema), async (c) => {
     }
 
     const content = input.content!.trim()
-    const inputHash = await computeInputHash(content)
-    
-    // Early deduplication - check if we've already scanned this exact skill
-    const existing = await findJobByHash(c.env.DB, inputHash)
-    if (existing) {
-      return c.json({ 
-        success: true, 
-        message: 'Skill already scanned - returning cached result',
-        jobId: existing.id,
-        status: existing.status,
-        cached: true
-      })
+    const contentHash = await computeInputHash(content)
+
+    if (dedupEnabled) {
+      const existing = await findJobByHash(c.env.DB, contentHash)
+      if (existing) {
+        return c.json({
+          success: true,
+          message: 'Skill already scanned - returning cached result',
+          jobId: existing.id,
+          status: existing.status,
+          cached: true,
+        })
+      }
     }
 
     const jobId = crypto.randomUUID()
-    const bindings = buildJobInsertBindings(jobId, inputHash, content, input.sourceType, input.url?.trim() || null, input.userId || null)
+    const rowHash = dedupEnabled ? contentHash : computePendingTextJobInputHash(jobId)
+    const bindings = buildJobInsertBindings(jobId, rowHash, content, input.sourceType, input.url?.trim() || null, input.userId || null)
 
     await c.env.DB.prepare(
-      `INSERT INTO jobs (id, input_hash, original_text, source_type, url, user_id, status, stage)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO jobs (id, input_hash, original_text, source_type, url, user_id, status, stage, progress)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(...bindings).run()
 
-    await c.env.SKILLS_QUEUE_1.send(buildTextQueueMessage(jobId, content, inputHash, input))
+    await c.env.SKILLS_QUEUE_1.send(buildTextQueueMessage(jobId, content, rowHash, input))
 
     return c.json({ 
       success: true, 
@@ -363,10 +384,11 @@ app.get('/api/skills/:id', async (c) => {
     return c.json(formatJobProgressResponse(id, jobRec))
   } catch (error) {
     console.error('Failed to fetch job status:', error)
-    return c.json({ 
+    return c.json({
       id,
       status: 'processing',
-      progress: 33 
+      progress: 33,
+      progressPhase: progressPhaseFromValue(33),
     })
   }
 })

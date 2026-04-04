@@ -32,7 +32,7 @@ export function ScanPage() {
     )
   }
 
-  const { status, progress, result } = data
+  const { status, progress, progressPhase, result } = data
   const hasResult = !!result
 
   return (
@@ -91,7 +91,7 @@ export function ScanPage() {
               />
             </div>
             <p className="text-sm text-stone-600 dark:text-stone-400">
-              Analyzing skill… This page refreshes automatically.
+              {progressPhase ?? 'Analyzing skill…'} This page refreshes automatically.
             </p>
           </>
         )}

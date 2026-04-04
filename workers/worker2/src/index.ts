@@ -2,11 +2,17 @@
 import type { QueueMessage } from './types'
 import { detectInjections, extractShellCommands, getTagsFromText } from './types'
 import type { QueueMessageMetadata } from '../../../backend/src/types'
+import {
+  PROGRESS_DETECTION_DONE,
+  PROGRESS_STAGE2_DONE,
+  raiseJobProgress,
+} from '../../../backend/src/job-progress'
 
 export interface Env {
   SKILLS_QUEUE_2: Queue
   SKILLS_QUEUE_3: Queue
   AI: Ai
+  DB: D1Database
 }
 
 export interface LlmTaggingResponse {
@@ -24,8 +30,172 @@ export function trimToWordLimit(text: string, maxWords: number): string {
   return words.slice(0, maxWords).join(' ')
 }
 
+const FALLBACK_MAX_WORDS = 40
+const FALLBACK_MAX_CHARS = 280
+const FALLBACK_SUFFIX = '(AI summary unavailable.)'
+/** Minimum source length before treating a long summary as an echo of the input. */
+const ECHO_CHECK_MIN_INPUT = 200
+/** If the model returns a summary this long relative to the source, treat as unusable. */
+const ECHO_LENGTH_RATIO = 0.85
+
+export function stripYamlFrontmatter(text: string): string {
+  const t = text.trimStart()
+  if (!t.startsWith('---')) return text
+  const m = t.match(/^---\r?\n[\s\S]*?\r?\n---\s*\r?\n?/)
+  if (!m) return text
+  return t.slice(m[0].length).trimStart()
+}
+
+export function firstMarkdownParagraph(text: string): string {
+  const body = stripYamlFrontmatter(text).trim()
+  const para = body.split(/\n\s*\n/)[0] ?? body
+  return para.replace(/\s+/g, ' ').trim()
+}
+
 export function fallbackSummary(text: string): string {
-  return trimToWordLimit(text, 128)
+  let blurb = firstMarkdownParagraph(text)
+  if (!blurb) blurb = text.trim().split(/\s+/).slice(0, FALLBACK_MAX_WORDS).join(' ')
+  blurb = trimToWordLimit(blurb, FALLBACK_MAX_WORDS)
+  if (blurb.length > FALLBACK_MAX_CHARS) {
+    blurb = `${blurb.slice(0, FALLBACK_MAX_CHARS - 1).trimEnd()}…`
+  }
+  return blurb ? `${blurb} ${FALLBACK_SUFFIX}` : FALLBACK_SUFFIX
+}
+
+export function extractBalancedJsonObject(raw: string): string | null {
+  const start = raw.indexOf('{')
+  if (start < 0) return null
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < raw.length; i++) {
+    const c = raw[i]
+    if (escape) {
+      escape = false
+      continue
+    }
+    if (c === '\\' && inString) {
+      escape = true
+      continue
+    }
+    if (c === '"') {
+      inString = !inString
+      continue
+    }
+    if (!inString) {
+      if (c === '{') depth++
+      else if (c === '}') {
+        depth--
+        if (depth === 0) return raw.slice(start, i + 1)
+      }
+    }
+  }
+  return null
+}
+
+export function stripMarkdownJsonFence(raw: string): string {
+  const t = raw.trim()
+  const fenced = t.match(/^```(?:json)?\s*([\s\S]*?)```$/im)
+  if (fenced) return fenced[1].trim()
+  const partial = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '')
+  return partial.trim()
+}
+
+export function parseLlmTaggingJson(raw: string): LlmTaggingResponse | null {
+  if (!raw.trim()) return null
+  const cleaned = stripMarkdownJsonFence(raw.trim())
+  const attempts = [cleaned, raw.trim()]
+  for (const chunk of attempts) {
+    try {
+      const parsed = JSON.parse(chunk) as LlmTaggingResponse
+      if (parsed && typeof parsed === 'object') return parsed
+    } catch {
+      /* try next */
+    }
+    const balanced = extractBalancedJsonObject(chunk)
+    if (balanced) {
+      try {
+        const parsed = JSON.parse(balanced) as LlmTaggingResponse
+        if (parsed && typeof parsed === 'object') return parsed
+      } catch {
+        /* continue */
+      }
+    }
+  }
+  return null
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((x): x is string => typeof x === 'string')
+}
+
+export function normalizeLlmTaggingResponse(
+  parsed: LlmTaggingResponse | null,
+  sourceText: string,
+): LlmTaggingResponse | null {
+  if (!parsed) return null
+  const summary =
+    typeof parsed.summary === 'string' ? parsed.summary.trim() : ''
+  if (!summary) return null
+  const src = sourceText.trim()
+  if (src.length >= ECHO_CHECK_MIN_INPUT && summary.length > src.length * ECHO_LENGTH_RATIO) {
+    return null
+  }
+  if (summary === src) return null
+  return {
+    tags: coerceStringArray(parsed.tags),
+    summary,
+  }
+}
+
+function logAiTaggingFailure(reason: string, raw: string, err?: unknown): void {
+  const prefix = raw.slice(0, 80).replace(/\s+/g, ' ')
+  console.warn(
+    JSON.stringify({
+      stage: 'worker2_ai',
+      reason,
+      rawLen: raw.length,
+      rawPrefix: prefix,
+      err: err instanceof Error ? err.message : undefined,
+    }),
+  )
+}
+
+export async function getAiTagging(
+  env: Env,
+  text: string,
+  preDetectedTags: string[],
+): Promise<LlmTaggingResponse | null> {
+  const prompt = [
+    'You are a secure skill classifier.',
+    'Return strict JSON only with keys: tags (string[]), summary (string).',
+    'Summary must be <= 128 words.',
+    `Already detected tags: ${preDetectedTags.join(', ') || 'none'}`,
+    `Skill text:\n${text}`,
+  ].join('\n')
+
+  try {
+    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as keyof AiModels, {
+      prompt,
+      max_tokens: 450,
+    })
+    const raw = (response as { response?: string }).response ?? ''
+    const parsed = parseLlmTaggingJson(raw)
+    if (!parsed) {
+      logAiTaggingFailure('parse_failed', raw)
+      return null
+    }
+    const normalized = normalizeLlmTaggingResponse(parsed, text)
+    if (!normalized) {
+      logAiTaggingFailure('empty_or_echo_summary', raw)
+      return null
+    }
+    return normalized
+  } catch (error) {
+    logAiTaggingFailure('ai_error', '', error)
+    return null
+  }
 }
 
 export function detectObfuscationSignals(text: string): string[] {
@@ -48,34 +218,6 @@ export function computeRiskLevel(input: {
   return 'low'
 }
 
-export async function getAiTagging(
-  env: Env,
-  text: string,
-  preDetectedTags: string[],
-): Promise<LlmTaggingResponse | null> {
-  const prompt = [
-    'You are a secure skill classifier.',
-    'Return strict JSON only with keys: tags (string[]), summary (string).',
-    'Summary must be <= 128 words.',
-    `Already detected tags: ${preDetectedTags.join(', ') || 'none'}`,
-    `Skill text:\n${text}`,
-  ].join('\n')
-
-  try {
-    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as keyof AiModels, {
-      prompt,
-      max_tokens: 350,
-    })
-    const raw = (response as { response?: string }).response ?? ''
-    const jsonSlice = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)
-    if (!jsonSlice) return null
-    const parsed = JSON.parse(jsonSlice) as LlmTaggingResponse
-    return parsed
-  } catch {
-    return null
-  }
-}
-
 export interface Stage2DetectionResult {
   shellCommands: string[]
   injections: string[]
@@ -88,7 +230,7 @@ export function runDeterministicDetection(
   text: string,
   metadata: QueueMessageMetadata,
 ): Stage2DetectionResult {
-  const shellCommands = extractShellCommands(text)
+  const shellCommands = extractShellCommands(text, metadata.shellCommandCandidates)
   const injections = detectInjections(text)
   const suspiciousPhrases = metadata.suspiciousPhrases ?? []
   const obfuscatedSignals = dedupeTags([
@@ -160,10 +302,12 @@ const handler: ExportedHandler<Env> = {
         const text = metadata.sanitizedText || job.originalText || ''
 
         const detection = runDeterministicDetection(text, metadata)
+        await raiseJobProgress(env.DB, job.id, PROGRESS_DETECTION_DONE)
         const aiResult = await getAiTagging(env, text, detection.deterministicTags)
         const stage2 = assembleStage2Result(text, detection, aiResult)
         const processed = buildStage3Message(job, metadata, stage2)
 
+        await raiseJobProgress(env.DB, job.id, PROGRESS_STAGE2_DONE)
         await env.SKILLS_QUEUE_3.send(processed)
         message.ack()
       } catch (error) {

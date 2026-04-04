@@ -9,6 +9,7 @@ export const D1_TEST_STATEMENTS: string[] = [
 	\`user_id\` text,
 	\`status\` text DEFAULT 'queued' NOT NULL,
 	\`stage\` integer DEFAULT 1 NOT NULL,
+	\`progress\` integer DEFAULT 8 NOT NULL,
 	\`created_at\` integer DEFAULT (unixepoch()) NOT NULL,
 	\`updated_at\` integer DEFAULT (unixepoch()) NOT NULL
 )`,

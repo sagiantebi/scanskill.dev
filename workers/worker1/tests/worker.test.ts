@@ -10,7 +10,7 @@ import {
   processStage1,
   buildStage2Message,
 } from '../src/index'
-import { extractUrls } from '../src/types'
+import { extractUrls, isValidHttpUrl } from '../src/types'
 import type { QueueMessage } from '../src/types'
 
 /* ── normalizeText ────────────────────────────────────────────── */
@@ -207,6 +207,28 @@ describe('extractUrls', () => {
   it('extracts URLs embedded in markdown', () => {
     const result = extractUrls('Check [docs](https://docs.example.com/guide) for details')
     expect(result.some((u) => u.startsWith('https://docs.example.com'))).toBe(true)
+  })
+
+  it('drops ellipsis placeholder URLs', () => {
+    expect(extractUrls('see http://... for docs')).toEqual([])
+  })
+
+  it('drops hosts without a dot (non-localhost)', () => {
+    expect(extractUrls('bad http://notahost/path')).toEqual([])
+  })
+
+  it('keeps localhost URLs', () => {
+    expect(extractUrls('run http://localhost:3000')).toEqual(['http://localhost:3000'])
+  })
+})
+
+describe('isValidHttpUrl', () => {
+  it('accepts typical https URLs', () => {
+    expect(isValidHttpUrl('https://api.service.io/v1')).toBe(true)
+  })
+
+  it('rejects placeholder hostnames', () => {
+    expect(isValidHttpUrl('http://your-domain/foo')).toBe(false)
   })
 })
 

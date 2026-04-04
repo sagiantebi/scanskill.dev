@@ -57,6 +57,7 @@ export interface Job {
   userId?: string
   status: 'queued' | 'processing' | 'completed' | 'failed'
   stage: number
+  progress?: number
   createdAt?: number
   updatedAt?: number
 }

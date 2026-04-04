@@ -10,6 +10,7 @@ export const jobs = sqliteTable('jobs', {
   userId: text('user_id'),
   status: text('status', { enum: ['queued', 'processing', 'completed', 'failed'] }).notNull().default('queued'),
   stage: integer('stage').notNull().default(1),
+  progress: integer('progress').notNull().default(8),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`CURRENT_TIMESTAMP`),
 })

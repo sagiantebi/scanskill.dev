@@ -8,8 +8,14 @@ import {
   formatScanResultResponse,
   formatJobProgressResponse,
 } from '../../src/index'
-import { computePendingUrlJobInputHash, computeInputHash } from '../../src/utils'
+import {
+  computePendingUrlJobInputHash,
+  computePendingTextJobInputHash,
+  computeInputHash,
+  isSkillScanDedupEnabled,
+} from '../../src/utils'
 import { AppError } from '../../src/app-error'
+import { PROGRESS_QUEUED, progressPhaseFromValue, resolveJobProgressPercent } from '../../src/job-progress'
 
 /* ── parseJsonField ───────────────────────────────────────────── */
 
@@ -74,6 +80,34 @@ describe('computePendingUrlJobInputHash', () => {
     const a = computePendingUrlJobInputHash('id-1')
     const b = computePendingUrlJobInputHash('id-2')
     expect(a).not.toBe(b)
+  })
+})
+
+/* ── computePendingTextJobInputHash ───────────────────────────── */
+
+describe('computePendingTextJobInputHash', () => {
+  it('returns correct prefix format', () => {
+    expect(computePendingTextJobInputHash('abc-123')).toBe('pending-text:abc-123')
+  })
+
+  it('produces different hashes for different jobIds', () => {
+    const a = computePendingTextJobInputHash('id-1')
+    const b = computePendingTextJobInputHash('id-2')
+    expect(a).not.toBe(b)
+  })
+})
+
+/* ── isSkillScanDedupEnabled ──────────────────────────────────── */
+
+describe('isSkillScanDedupEnabled', () => {
+  it('is true when unset', () => {
+    expect(isSkillScanDedupEnabled(undefined)).toBe(true)
+  })
+
+  it('is false only for the string false', () => {
+    expect(isSkillScanDedupEnabled('false')).toBe(false)
+    expect(isSkillScanDedupEnabled('true')).toBe(true)
+    expect(isSkillScanDedupEnabled('')).toBe(true)
   })
 })
 
@@ -153,9 +187,9 @@ describe('buildUrlQueueMessage', () => {
 /* ── buildJobInsertBindings ───────────────────────────────────── */
 
 describe('buildJobInsertBindings', () => {
-  it('produces an 8-element tuple', () => {
+  it('produces a 9-element tuple', () => {
     const bindings = buildJobInsertBindings('j1', 'h1', 'content', 'text', null, null)
-    expect(bindings).toHaveLength(8)
+    expect(bindings).toHaveLength(9)
   })
 
   it('handles null url and userId', () => {
@@ -164,9 +198,19 @@ describe('buildJobInsertBindings', () => {
     expect(bindings[5]).toBeNull()
   })
 
-  it('matches INSERT column order: id, hash, text, type, url, userId, status, stage', () => {
+  it('matches INSERT column order including progress', () => {
     const bindings = buildJobInsertBindings('j1', 'hash', 'text', 'text', 'https://a.com', 'u1')
-    expect(bindings).toEqual(['j1', 'hash', 'text', 'text', 'https://a.com', 'u1', 'queued', 1])
+    expect(bindings).toEqual([
+      'j1',
+      'hash',
+      'text',
+      'text',
+      'https://a.com',
+      'u1',
+      'queued',
+      1,
+      PROGRESS_QUEUED,
+    ])
   })
 })
 
@@ -218,14 +262,37 @@ describe('formatScanResultResponse', () => {
     const resp = formatScanResultResponse('id-1', job, result)
     expect(resp.progress).toBe(100)
   })
+
+  it('includes progressPhase Complete', () => {
+    const resp = formatScanResultResponse('id-1', job, result)
+    expect(resp.progressPhase).toBe('Complete')
+  })
 })
 
 /* ── formatJobProgressResponse ────────────────────────────────── */
 
 describe('formatJobProgressResponse', () => {
-  it('computes progress from stage number', () => {
+  it('computes progress from stage number when progress column absent', () => {
     const resp = formatJobProgressResponse('id-1', { stage: 2, status: 'processing' })
     expect(resp.progress).toBe(66)
+  })
+
+  it('prefers jobs.progress over stage when present', () => {
+    const resp = formatJobProgressResponse('id-1', {
+      stage: 1,
+      progress: 58,
+      status: 'processing',
+    })
+    expect(resp.progress).toBe(58)
+    expect(resp.progressPhase).toBe('Classifying with AI…')
+  })
+
+  it('caps in-flight progress at 99', () => {
+    const resp = formatJobProgressResponse('id-1', {
+      progress: 150,
+      status: 'processing',
+    })
+    expect(resp.progress).toBe(99)
   })
 
   it('defaults to 33 progress for missing/zero stage', () => {
@@ -252,6 +319,25 @@ describe('formatJobProgressResponse', () => {
   it('defaults status to processing when missing', () => {
     const resp = formatJobProgressResponse('id-1', {})
     expect(resp.status).toBe('processing')
+  })
+
+  it('uses Scan failed phase when status is failed', () => {
+    const resp = formatJobProgressResponse('id-1', { status: 'failed', progress: 0 })
+    expect(resp.progressPhase).toBe('Scan failed')
+  })
+})
+
+/* ── resolveJobProgressPercent / progressPhaseFromValue ───────── */
+
+describe('resolveJobProgressPercent', () => {
+  it('returns 100 for completed status', () => {
+    expect(resolveJobProgressPercent({ status: 'completed', progress: 42 })).toBe(100)
+  })
+})
+
+describe('progressPhaseFromValue', () => {
+  it('labels queued band', () => {
+    expect(progressPhaseFromValue(7)).toBe('Queued…')
   })
 })
 

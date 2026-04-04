@@ -6,6 +6,13 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "skills-scanner-db",
+      "database_id": "skills-scanner-db"
+    }
+  ],
   "ai": {
     "binding": "AI"
   },
@@ -27,6 +34,16 @@
   "env": {
     "staging": {
       "name": "skills-scanner-worker2-staging",
+      "ai": {
+        "binding": "AI"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "skills-scanner-db-staging",
+          "database_id": "d6435595-1d8e-43cc-8667-9acf8ea788cf"
+        }
+      ],
       "queues": {
         "consumers": [
           {
@@ -45,6 +62,16 @@
     },
     "production": {
       "name": "skills-scanner-worker2",
+      "ai": {
+        "binding": "AI"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "skills-scanner-db",
+          "database_id": "dc895145-b3dc-401e-924e-cafb39ef91be"
+        }
+      ],
       "queues": {
         "consumers": [
           {
