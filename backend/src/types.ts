@@ -5,6 +5,11 @@ export interface QueueMessage {
   sourceType: 'text' | 'url'
   url?: string
   userId?: string
+  /**
+   * Mirrors API `SKILL_SCAN_DEDUP_ENABLED`. When false, worker1 uses a per-job content hash so
+   * identical skill text still runs the full pipeline (no scan_results copy from a canonical job).
+   */
+  apiDedupEnabled?: boolean
   status: 'queued' | 'processing' | 'completed' | 'failed'
   stage: number
   timestamp: number

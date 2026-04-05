@@ -12,6 +12,19 @@ export async function computeInputHash(text: string): Promise<string> {
 }
 
 /**
+ * Content hash stored on `jobs.input_hash` after worker1. When API dedup is off, mix in `jobId` so
+ * each submission stays unique (D1 unique index) and worker1 cannot short-circuit via canonical copy.
+ */
+export async function computeJobContentInputHash(
+  jobId: string,
+  markdown: string,
+  apiDedupEnabled: boolean,
+): Promise<string> {
+  if (apiDedupEnabled) return computeInputHash(markdown)
+  return computeInputHash(`${jobId}\0${markdown}`)
+}
+
+/**
  * Find existing job by input hash
  */
 export async function findJobByHash(db: D1Database, inputHash: string) {

@@ -2,7 +2,7 @@
 import type { QueueMessage } from './types'
 import { extractUrls } from './types'
 import type { QueueMessageMetadata } from '../../../backend/src/types'
-import { computeInputHash } from '../../../backend/src/utils'
+import { computeJobContentInputHash } from '../../../backend/src/utils'
 import {
   markJobProcessing,
   PROGRESS_STAGE1_DONE,
@@ -21,6 +21,10 @@ export interface Env {
 
 const MAX_DECODE_PASSES = 2
 const MAX_FETCH_BYTES = 2 * 1024 * 1024
+
+function logWorker1(event: string, data: Record<string, unknown>): void {
+  console.log(JSON.stringify({ stage: 'worker1', event, ...data }))
+}
 
 /**
  * github.com/{owner}/{repo}/blob/{ref}/{path} serves HTML. Raw file content is at raw.githubusercontent.com.
@@ -187,7 +191,18 @@ async function fetchSkillMarkdown(url: string): Promise<string> {
     throw new Error(`Fetch failed ${res.status} for ${fetchUrl}`)
   }
   const text = await res.text()
-  return text.length > MAX_FETCH_BYTES ? text.slice(0, MAX_FETCH_BYTES) : text
+  const body = text.length > MAX_FETCH_BYTES ? text.slice(0, MAX_FETCH_BYTES) : text
+  const head = body.slice(0, 80).replace(/[^\x20-\x7E\n]/g, ' ')
+  logWorker1('fetch_skill_markdown', {
+    requestedUrlPrefix: url.trim().slice(0, 120),
+    fetchUrlPrefix: fetchUrl.slice(0, 120),
+    blobRewrittenToRaw: fetchUrl !== url.trim(),
+    byteLength: body.length,
+    contentType: res.headers.get('content-type') ?? '',
+    looksLikeHtml: /^\s*</.test(body) || /<\/[a-z][\s>]/i.test(head),
+    textHeadAscii: head.replace(/\s+/g, ' ').slice(0, 72),
+  })
+  return body
 }
 
 async function findCanonicalCompletedJobId(
@@ -213,6 +228,11 @@ async function copyScanResultsFromCanonical(
   targetJobId: string,
   originalMarkdown: string,
 ): Promise<void> {
+  logWorker1('content_hash_dedupe_copy', {
+    targetJobId,
+    canonicalJobId: canonicalId,
+    markdownBytes: originalMarkdown.length,
+  })
   await db
     .prepare(
       `INSERT INTO scan_results (id, job_id, sanitized_text, urls, shell_commands, injections, tags, risk_level, tldr, metadata, created_at)
@@ -288,7 +308,15 @@ async function resolveUrlJob(
 
   await markJobProcessing(env.DB, job.id, PROGRESS_URL_FETCHED)
 
-  const contentHash = await computeInputHash(markdown)
+  const apiDedupEnabled = job.apiDedupEnabled !== false
+  const contentHash = await computeJobContentInputHash(job.id, markdown, apiDedupEnabled)
+
+  logWorker1('url_job_after_fetch', {
+    jobId: job.id,
+    apiDedupEnabled,
+    contentHashPrefix: contentHash.slice(0, 12),
+    markdownBytes: markdown.length,
+  })
 
   const canonicalId = await findCanonicalCompletedJobId(env.DB, contentHash, job.id)
   if (canonicalId) {
@@ -298,6 +326,7 @@ async function resolveUrlJob(
 
   const claimed = await claimContentHashAndOriginalText(env.DB, job.id, contentHash, markdown)
   if (claimed === 'ok') {
+    logWorker1('url_job_pipeline', { jobId: job.id, path: 'full_stage1', claim: 'ok' })
     return { kind: 'proceed', markdown, contentHash }
   }
 
@@ -320,6 +349,11 @@ async function resolveUrlJob(
     throw new Error(`Content hash claimed but scan not ready yet for winner ${other.id}; retry`)
   }
 
+  logWorker1('url_job_pipeline', {
+    jobId: job.id,
+    path: 'content_hash_dedupe_waiter',
+    otherJobId: other.id,
+  })
   await copyScanResultsFromCanonical(env.DB, other.id, job.id, markdown)
   return { kind: 'deduped', markdown, contentHash }
 }
@@ -341,7 +375,15 @@ async function resolvePendingTextJob(
 
   await markJobProcessing(env.DB, job.id, PROGRESS_PROCESSING)
 
-  const contentHash = await computeInputHash(markdown)
+  const apiDedupEnabled = job.apiDedupEnabled !== false
+  const contentHash = await computeJobContentInputHash(job.id, markdown, apiDedupEnabled)
+
+  logWorker1('text_job_pending_resolve', {
+    jobId: job.id,
+    apiDedupEnabled,
+    contentHashPrefix: contentHash.slice(0, 12),
+    markdownBytes: markdown.length,
+  })
 
   const canonicalId = await findCanonicalCompletedJobId(env.DB, contentHash, job.id)
   if (canonicalId) {
@@ -351,6 +393,7 @@ async function resolvePendingTextJob(
 
   const claimed = await claimContentHashAndOriginalText(env.DB, job.id, contentHash, markdown)
   if (claimed === 'ok') {
+    logWorker1('text_job_pipeline', { jobId: job.id, path: 'full_stage1', claim: 'ok' })
     return { kind: 'proceed', markdown, contentHash }
   }
 
@@ -373,6 +416,11 @@ async function resolvePendingTextJob(
     throw new Error(`Content hash claimed but scan not ready yet for winner ${other.id}; retry`)
   }
 
+  logWorker1('text_job_pipeline', {
+    jobId: job.id,
+    path: 'content_hash_dedupe_waiter',
+    otherJobId: other.id,
+  })
   await copyScanResultsFromCanonical(env.DB, other.id, job.id, markdown)
   return { kind: 'deduped', markdown, contentHash }
 }

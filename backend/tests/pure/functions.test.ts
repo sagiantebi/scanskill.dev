@@ -12,6 +12,7 @@ import {
   computePendingUrlJobInputHash,
   computePendingTextJobInputHash,
   computeInputHash,
+  computeJobContentInputHash,
   isSkillScanDedupEnabled,
 } from '../../src/utils'
 import { AppError } from '../../src/app-error'
@@ -133,6 +134,22 @@ describe('computeInputHash', () => {
   })
 })
 
+describe('computeJobContentInputHash', () => {
+  it('matches computeInputHash when api dedup is enabled', async () => {
+    const md = '# Skill\n\nBody.'
+    const a = await computeJobContentInputHash('job-a', md, true)
+    const b = await computeInputHash(md)
+    expect(a).toBe(b)
+  })
+
+  it('differs per job id when api dedup is disabled', async () => {
+    const md = '# Same'
+    const h1 = await computeJobContentInputHash('job-1', md, false)
+    const h2 = await computeJobContentInputHash('job-2', md, false)
+    expect(h1).not.toBe(h2)
+  })
+})
+
 /* ── buildTextQueueMessage ────────────────────────────────────── */
 
 describe('buildTextQueueMessage', () => {
@@ -147,6 +164,7 @@ describe('buildTextQueueMessage', () => {
     expect(msg.sourceType).toBe('text')
     expect(msg.status).toBe('queued')
     expect(msg.stage).toBe(1)
+    expect(msg.apiDedupEnabled).toBe(true)
   })
 
   it('handles optional userId as undefined', () => {
@@ -163,6 +181,11 @@ describe('buildTextQueueMessage', () => {
     })
     expect(msg.url).toBe('https://example.com')
   })
+
+  it('sets apiDedupEnabled when provided', () => {
+    const msg = buildTextQueueMessage('job-x', 'text', 'hash', { sourceType: 'text' }, false)
+    expect(msg.apiDedupEnabled).toBe(false)
+  })
 })
 
 /* ── buildUrlQueueMessage ─────────────────────────────────────── */
@@ -176,11 +199,17 @@ describe('buildUrlQueueMessage', () => {
     expect(msg.inputHash).toBe('pending-url:job-1')
     expect(msg.status).toBe('queued')
     expect(msg.stage).toBe(1)
+    expect(msg.apiDedupEnabled).toBe(true)
   })
 
   it('handles missing userId', () => {
     const msg = buildUrlQueueMessage('job-2', 'hash', 'https://a.com')
     expect(msg.userId).toBeUndefined()
+  })
+
+  it('sets apiDedupEnabled when provided', () => {
+    const msg = buildUrlQueueMessage('job-x', 'pending-url:job-x', 'https://x.com', undefined, false)
+    expect(msg.apiDedupEnabled).toBe(false)
   })
 })
 

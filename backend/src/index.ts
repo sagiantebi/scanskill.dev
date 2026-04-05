@@ -50,6 +50,7 @@ export function buildTextQueueMessage(
   content: string,
   inputHash: string,
   input: { sourceType: 'text' | 'url'; url?: string; userId?: string },
+  apiDedupEnabled = true,
 ): QueueMessage {
   return {
     id: jobId,
@@ -58,6 +59,7 @@ export function buildTextQueueMessage(
     sourceType: input.sourceType,
     url: input.url,
     userId: input.userId,
+    apiDedupEnabled,
     status: 'queued',
     stage: 1,
     timestamp: Date.now(),
@@ -69,6 +71,7 @@ export function buildUrlQueueMessage(
   pendingHash: string,
   sourceUrl: string,
   userId?: string,
+  apiDedupEnabled = true,
 ): QueueMessage {
   return {
     id: jobId,
@@ -77,6 +80,7 @@ export function buildUrlQueueMessage(
     sourceType: 'url',
     url: sourceUrl,
     userId,
+    apiDedupEnabled,
     status: 'queued',
     stage: 1,
     timestamp: Date.now(),
@@ -222,7 +226,9 @@ app.post('/api/skills', zValidator('json', SkillInputSchema), async (c) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(...bindings).run()
 
-      await c.env.SKILLS_QUEUE_1.send(buildUrlQueueMessage(jobId, pendingHash, sourceUrl, input.userId))
+      await c.env.SKILLS_QUEUE_1.send(
+        buildUrlQueueMessage(jobId, pendingHash, sourceUrl, input.userId, dedupEnabled),
+      )
 
       return c.json({
         success: true,
@@ -257,7 +263,7 @@ app.post('/api/skills', zValidator('json', SkillInputSchema), async (c) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(...bindings).run()
 
-    await c.env.SKILLS_QUEUE_1.send(buildTextQueueMessage(jobId, content, rowHash, input))
+    await c.env.SKILLS_QUEUE_1.send(buildTextQueueMessage(jobId, content, rowHash, input, dedupEnabled))
 
     return c.json({ 
       success: true, 

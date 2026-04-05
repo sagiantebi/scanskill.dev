@@ -188,9 +188,38 @@ export async function getAiTagging(
     }
     const normalized = normalizeLlmTaggingResponse(parsed, text)
     if (!normalized) {
+      const sum = typeof parsed.summary === 'string' ? parsed.summary.trim() : ''
+      const src = text.trim()
+      const echoThreshold = src.length * ECHO_LENGTH_RATIO
+      const rejectKind =
+        sum.length === 0
+          ? 'empty_summary'
+          : sum === src
+            ? 'exact_match'
+            : src.length >= ECHO_CHECK_MIN_INPUT && sum.length > echoThreshold
+              ? 'echo_length'
+              : 'unknown'
+      console.log(
+        JSON.stringify({
+          stage: 'worker2_ai',
+          event: 'summary_rejected',
+          rejectKind,
+          srcLen: src.length,
+          summaryLen: sum.length,
+          echoThresholdLen: echoThreshold,
+        }),
+      )
       logAiTaggingFailure('empty_or_echo_summary', raw)
       return null
     }
+    console.log(
+      JSON.stringify({
+        stage: 'worker2_ai',
+        event: 'summary_accepted',
+        srcLen: text.trim().length,
+        summaryLen: normalized.summary.length,
+      }),
+    )
     return normalized
   } catch (error) {
     logAiTaggingFailure('ai_error', '', error)
@@ -305,6 +334,18 @@ const handler: ExportedHandler<Env> = {
         await raiseJobProgress(env.DB, job.id, PROGRESS_DETECTION_DONE)
         const aiResult = await getAiTagging(env, text, detection.deterministicTags)
         const stage2 = assembleStage2Result(text, detection, aiResult)
+        console.log(
+          JSON.stringify({
+            stage: 'worker2',
+            event: 'stage2_complete',
+            jobId: job.id,
+            sourceLen: text.length,
+            aiTaggingUsed: aiResult != null,
+            summaryLen: stage2.summary.length,
+            usedFallbackSuffix: stage2.summary.includes(FALLBACK_SUFFIX),
+            summaryHeadAscii: stage2.summary.slice(0, 100).replace(/[^\x20-\x7E]/g, ' '),
+          }),
+        )
         const processed = buildStage3Message(job, metadata, stage2)
 
         await raiseJobProgress(env.DB, job.id, PROGRESS_STAGE2_DONE)
