@@ -217,7 +217,7 @@ export async function getAiTagging(
         stage: 'worker2_ai',
         event: 'summary_accepted',
         srcLen: text.trim().length,
-        summaryLen: normalized.summary.length,
+        summaryLen: (normalized.summary ?? '').length,
       }),
     )
     return normalized
