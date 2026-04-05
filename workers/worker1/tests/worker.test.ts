@@ -9,9 +9,52 @@ import {
   filterShellCommandCandidates,
   processStage1,
   buildStage2Message,
+  githubBlobUrlToRawUrl,
 } from '../src/index'
 import { extractUrls, isValidHttpUrl } from '../src/types'
 import type { QueueMessage } from '../src/types'
+
+/* ── githubBlobUrlToRawUrl ───────────────────────────────────── */
+
+describe('githubBlobUrlToRawUrl', () => {
+  it('rewrites github blob URLs to raw.githubusercontent.com', () => {
+    expect(
+      githubBlobUrlToRawUrl(
+        'https://github.com/ComposioHQ/awesome-claude-skills/blob/master/changelog-generator/SKILL.md',
+      ),
+    ).toBe(
+      'https://raw.githubusercontent.com/ComposioHQ/awesome-claude-skills/master/changelog-generator/SKILL.md',
+    )
+  })
+
+  it('handles www.github.com', () => {
+    expect(
+      githubBlobUrlToRawUrl(
+        'https://www.github.com/o/r/blob/main/docs/a.md',
+      ),
+    ).toBe('https://raw.githubusercontent.com/o/r/main/docs/a.md')
+  })
+
+  it('strips trailing slash before rewriting', () => {
+    expect(
+      githubBlobUrlToRawUrl(
+        'https://github.com/ComposioHQ/awesome-claude-skills/blob/master/changelog-generator/SKILL.md/',
+      ),
+    ).toBe(
+      'https://raw.githubusercontent.com/ComposioHQ/awesome-claude-skills/master/changelog-generator/SKILL.md',
+    )
+  })
+
+  it('returns null for raw URLs and non-GitHub hosts', () => {
+    expect(
+      githubBlobUrlToRawUrl(
+        'https://raw.githubusercontent.com/o/r/main/a.md',
+      ),
+    ).toBeNull()
+    expect(githubBlobUrlToRawUrl('https://example.com/a.md')).toBeNull()
+    expect(githubBlobUrlToRawUrl('https://github.com/o/r/issues/1')).toBeNull()
+  })
+})
 
 /* ── normalizeText ────────────────────────────────────────────── */
 

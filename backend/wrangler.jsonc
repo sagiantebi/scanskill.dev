@@ -30,7 +30,7 @@
     ]
   },
   "vars": {
-    "SKILL_SCAN_DEDUP_ENABLED": "true"
+    "SKILL_SCAN_DEDUP_ENABLED": "false"
   },
   "env": {
     "staging": {

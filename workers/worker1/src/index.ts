@@ -21,6 +21,24 @@ export interface Env {
 
 const MAX_DECODE_PASSES = 2
 const MAX_FETCH_BYTES = 2 * 1024 * 1024
+
+/**
+ * github.com/{owner}/{repo}/blob/{ref}/{path} serves HTML. Raw file content is at raw.githubusercontent.com.
+ */
+export function githubBlobUrlToRawUrl(url: string): string | null {
+  try {
+    const u = new URL(url.trim())
+    const host = u.hostname.toLowerCase()
+    if (host !== 'github.com' && host !== 'www.github.com') return null
+    const pathOnly = u.pathname.replace(/\/+$/, '')
+    const m = pathOnly.match(/^\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/)
+    if (!m) return null
+    const [, owner, repo, ref, pathInRepo] = m
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${pathInRepo}`
+  } catch {
+    return null
+  }
+}
 const SUSPICIOUS_PHRASES = [
   /ignore\s+(all\s+)?previous\s+instructions/gi,
   /reveal\s+(the\s+)?system\s+prompt/gi,
@@ -157,7 +175,8 @@ export function buildStage2Message(
 }
 
 async function fetchSkillMarkdown(url: string): Promise<string> {
-  const res = await fetch(url, {
+  const fetchUrl = githubBlobUrlToRawUrl(url) ?? url.trim()
+  const res = await fetch(fetchUrl, {
     redirect: 'follow',
     headers: {
       Accept: 'text/plain,text/markdown,*/*;q=0.8',
@@ -165,7 +184,7 @@ async function fetchSkillMarkdown(url: string): Promise<string> {
     },
   })
   if (!res.ok) {
-    throw new Error(`Fetch failed ${res.status} for ${url}`)
+    throw new Error(`Fetch failed ${res.status} for ${fetchUrl}`)
   }
   const text = await res.text()
   return text.length > MAX_FETCH_BYTES ? text.slice(0, MAX_FETCH_BYTES) : text
