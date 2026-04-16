@@ -20,17 +20,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.7.0",
-    "@hono/zod-validator": "^0.5.0",
-    "drizzle-orm": "^0.41.0",
-    "zod": "^3.24.0"
+    "hono": "^4.12.14",
+    "@hono/zod-validator": "^0.7.6",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/vitest-pool-workers": "^0.14.7",
     "@cloudflare/workers-types": "^4.20250320.0",
-    "drizzle-kit": "^0.30.0",
-    "typescript": "^5.8.0",
-    "vitest": "^3.0.0",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4",
     "wrangler": "^4.0.0"
   }
 }
